@@ -1,19 +1,23 @@
 //! Modern V4L2 capture with zero-copy and DMA-BUF support
 
+use std::os::unix::raw::dev_t;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use color_eyre::{eyre::eyre, Result};
-use tracing::{info, instrument, warn};
+use tracing::{info, instrument};
 use v4l::buffer::Type;
 use v4l::capability::Flags as CapFlags;
 use v4l::io::traits::CaptureStream;
-use v4l::prelude::*;
+use v4l::prelude::MmapStream;
 use v4l::video::Capture;
-use v4l::FourCC;
+use v4l::{Device, FourCC};
 
-use crate::{CaptureConfig, Frame, FrameMetadata, PixelFormat};
+use crate::{
+    capture::frame::{Frame, FrameMetadata, PixelFormat},
+    CaptureConfig,
+};
 
 /// High-performance V4L2 capture
 pub struct V4l2Capture {
@@ -27,10 +31,10 @@ pub struct V4l2Capture {
 impl V4l2Capture {
     /// Create new capture instance with zero-copy buffers
     pub fn new(config: CaptureConfig) -> Result<Self> {
-        info!("Initializing V4L2 capture: {}", config.device);
+        info!("Initializing V4L2 capture: {:?}", config.device);
 
         // Open device with O_NONBLOCK for async I/O
-        let device = Device::with_path(&config.device)?;
+        let device = Device::with_path(&config.device.path)?;
 
         // Query capabilities
         let caps = device.query_caps()?;
@@ -46,13 +50,10 @@ impl V4l2Capture {
         fmt.height = config.height;
         fmt.fourcc = match config.format {
             PixelFormat::Mjpeg => FourCC::new(b"MJPG"),
-            PixelFormat::Yuyv422 => FourCC::new(b"YUYV"),
+            PixelFormat::Yuyv4 => FourCC::new(b"YUYV"),
             _ => return Err(eyre!("Unsupported pixel format")),
         };
         device.set_format(&fmt)?;
-
-        // Note: Frame rate setting depends on the specific device
-        // Some devices may not support setting FPS directly
 
         // Pre-allocate buffers for zero-copy
         let buffer_size = (config.width * config.height * 3) as usize;
@@ -110,7 +111,7 @@ impl V4l2Capture {
             sequence: self.sequence,
             width: self.config.width,
             height: self.config.height,
-            stride: self.config.width, // Assuming packed
+            stride: self.config.width,
             format: self.config.format,
             device_timestamp: Some(
                 Duration::from_secs(meta.timestamp.sec as u64)
@@ -124,40 +125,4 @@ impl V4l2Capture {
             timestamp,
         })
     }
-}
-
-/// Auto-detect best capture device
-pub async fn auto_detect_device() -> Result<String> {
-    use std::path::Path;
-
-    info!("Auto-detecting capture devices...");
-
-    for i in 0..10 {
-        let path = format!("/dev/video{}", i);
-        if !Path::new(&path).exists() {
-            continue;
-        }
-
-        if let Ok(dev) = Device::with_path(&path) {
-            if let Ok(caps) = dev.query_caps() {
-                // Check for capture capability
-                if caps.capabilities.contains(CapFlags::VIDEO_CAPTURE) {
-                    // Prefer devices with MJPEG support
-                    if let Ok(formats) = dev.enum_formats() {
-                        for fmt in formats {
-                            if fmt.fourcc == FourCC::new(b"MJPG") {
-                                info!("Found MJPEG device: {} - {}", path, caps.card);
-                                return Ok(path);
-                            }
-                        }
-                    }
-
-                    info!("Found capture device: {} - {}", path, caps.card);
-                    return Ok(path);
-                }
-            }
-        }
-    }
-
-    Err(eyre!("No suitable capture device found"))
 }

@@ -1,59 +1,16 @@
-//! Video Pipeline
-//!
-//! Zero-copy, lock-free, GPU-accelerated video processing
-
-#![warn(rust_2018_idioms)]
-#![forbid(unsafe_code)] // We'll allow unsafe only where needed
-
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-
-use arc_swap::ArcSwap;
-use bytes::Bytes;
-use serde::{Deserialize, Serialize};
-
 pub mod capture;
 pub mod display;
-pub mod error;
-pub mod pipeline;
+pub mod utils;
+
+use arc_swap::ArcSwap;
+use capture::frame::PixelFormat;
+use serde::{Deserialize, Serialize};
+
+use crate::utils::FoundDevice;
 
 /// Global configuration that can be atomically swapped at runtime
 pub static CONFIG: once_cell::sync::Lazy<ArcSwap<Config>> =
     once_cell::sync::Lazy::new(|| ArcSwap::from_pointee(Config::default()));
-
-/// Frame data with zero-copy semantics
-#[derive(Clone)]
-pub struct Frame {
-    /// Immutable frame data - can be shared across threads without copying
-    pub data: Bytes,
-
-    /// Frame metadata
-    pub meta: Arc<FrameMetadata>,
-
-    /// Capture timestamp for latency tracking
-    pub timestamp: Instant,
-}
-
-/// Frame metadata
-#[derive(Debug, Clone)]
-pub struct FrameMetadata {
-    pub sequence: u64,
-    pub width: u32,
-    pub height: u32,
-    pub stride: u32,
-    pub format: PixelFormat,
-    pub device_timestamp: Option<Duration>, // Hardware timestamp if available
-}
-
-/// Pixel formats we support
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PixelFormat {
-    Rgb24,
-    Bgr24,
-    Yuyv422,
-    Mjpeg,
-    Nv12, // Hardware-accelerated format
-}
 
 /// System configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,7 +22,7 @@ pub struct Config {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CaptureConfig {
-    pub device: String,
+    pub device: FoundDevice,
     pub width: u32,
     pub height: u32,
     pub fps: u32,
@@ -79,9 +36,6 @@ pub struct CaptureConfig {
 pub struct DisplayConfig {
     pub width: u32,
     pub height: u32,
-    pub vsync: bool,
-    pub fullscreen: bool,
-    pub gpu_backend: GpuBackend,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -105,7 +59,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             capture: CaptureConfig {
-                device: "/dev/video0".into(),
+                device: FoundDevice::new("/dev/video0".into(), PixelFormat::Mjpeg.into()),
                 width: 1920,
                 height: 1080,
                 fps: 30,
@@ -117,15 +71,13 @@ impl Default for Config {
             display: DisplayConfig {
                 width: 1920,
                 height: 1080,
-                vsync: false,
-                fullscreen: false,
-                gpu_backend: GpuBackend::Auto,
             },
             pipeline: PipelineConfig {
                 ring_buffer_size: 8,
                 decode_threads: 2,
                 enable_profiling: false,
-                target_latency_ms: 16, // 60fps target
+                // target_latency_ms: 16, // 60fps target
+                target_latency_ms: 32, // 30fps target
             },
         }
     }
