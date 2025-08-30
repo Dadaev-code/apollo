@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use apollo::display::gst_display::run_gstreamer_pipeline;
 use apollo::Config;
 use color_eyre::Result;
 use tracing::{error, info};
@@ -21,28 +22,11 @@ async fn main() -> Result<()> {
     let config = Config::default();
     apollo::CONFIG.store(Arc::new(config.clone()));
 
-    #[cfg(feature = "gstreamer-pipeline")]
-    {
-        run_gstreamer_pipeline_main(config).await
-    }
-
-    #[cfg(not(feature = "gstreamer-pipeline"))]
-    {
-        run_legacy_pipeline(config).await
-    }
-}
-
-#[cfg(feature = "gstreamer-pipeline")]
-async fn run_gstreamer_pipeline(config: Config) -> Result<()> {
-    info!("Running high-performance GStreamer pipeline");
-
-    // Auto-detect capture device if needed
     let mut capture_config = config.capture.clone();
     if capture_config.device.path.is_empty() {
         let device = apollo::utils::auto_detect_device().await?;
         capture_config.device = device;
     }
-
     info!("Using capture device: {:?}", capture_config.device);
 
     // Run the simple pipeline that should size the window correctly
