@@ -60,14 +60,20 @@ page_size = "0.6" # Huge pages support
 rkyv = "0.7.45"
 sdl2 = { version = "0.37", features = ["bundled"] }
 jpeg-decoder = "0.3.2"
+# GStreamer dependencies for high-performance video pipeline
+gstreamer = { version = "0.23", optional = true }
+gstreamer-video = { version = "0.23", optional = true }
+gstreamer-app = { version = "0.23", optional = true }
+gstreamer-pbutils = { version = "0.23", optional = true }
 
 [features]
-default = ["gpu-display", "fast-jpeg"]
+default = ["gpu-display", "fast-jpeg", "gstreamer-pipeline"]
 gpu-display = [] # GPU accelerated display
 fast-jpeg = [] # Use -jpeg
 io-uring = ["tokio-uring"] # Linux io_uring support
 libcamera = ["dep:libcamera"] # Modern camera stack
 profiling = ["tracing-tracy"]
+gstreamer-pipeline = ["gstreamer", "gstreamer-video", "gstreamer-app", "gstreamer-pbutils"] # High-performance GStreamer pipeline
 
 [profile.release]
 opt-level = 3

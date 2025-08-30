@@ -1,15 +1,10 @@
-//! Apollo Video Pipeline with SDL2 and Camera Integration
+//! Apollo Video Pipeline with GStreamer or SDL2 Display
 
 use std::sync::Arc;
-use std::time::Duration;
 
-use apollo::{capture, Config, DisplayConfig};
-use color_eyre::{eyre::eyre, Result};
-use flume::bounded;
+use apollo::Config;
+use color_eyre::Result;
 use tracing::{error, info};
-
-use apollo::display::Sdl2Display;
-use apollo::utils;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -26,58 +21,35 @@ async fn main() -> Result<()> {
     let config = Config::default();
     apollo::CONFIG.store(Arc::new(config.clone()));
 
+    #[cfg(feature = "gstreamer-pipeline")]
+    {
+        run_gstreamer_pipeline_main(config).await
+    }
+
+    #[cfg(not(feature = "gstreamer-pipeline"))]
+    {
+        run_legacy_pipeline(config).await
+    }
+}
+
+#[cfg(feature = "gstreamer-pipeline")]
+async fn run_gstreamer_pipeline(config: Config) -> Result<()> {
+    info!("Running high-performance GStreamer pipeline");
+
     // Auto-detect capture device if needed
-    let device = if config.capture.device.path.is_empty() {
-        utils::auto_detect_device().await?
-    } else {
-        config.capture.device.clone()
-    };
+    let mut capture_config = config.capture.clone();
+    if capture_config.device.path.is_empty() {
+        let device = apollo::utils::auto_detect_device().await?;
+        capture_config.device = device;
+    }
 
-    info!("Using capture device: {:?}", device);
+    info!("Using capture device: {:?}", capture_config.device);
 
-    // Initialize capture
-    let mut capture_config = config.capture;
-    capture_config.device = device;
-    let mut capture = capture::V4l2Capture::new(capture_config)?;
-    capture.start_stream()?;
-
-    // Set up tx/rx
-    let (tx, rx) = bounded::<capture::Frame>(config.pipeline.ring_buffer_size);
-
-    // Spawn capture task
-    let _capture_handle = tokio::spawn(async move {
-        loop {
-            match capture.capture_frame().await {
-                Ok(frame) => {
-                    if let Err(e) = tx.send_async(frame).await {
-                        error!("Failed to send frame: {}", e);
-                        break;
-                    }
-                }
-                Err(e) => {
-                    error!("Capture error: {}", e);
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                }
-            }
-        }
-    });
-
-    // Set up display configuration
-    let display_config = DisplayConfig {
-        width: config.display.width,
-        height: config.display.height,
-    };
-
-    // Initialize SDL2
-    let sdl_context = sdl2::init().map_err(|e| eyre!(e))?;
-
-    // Get display dimensions
-    let width = display_config.width;
-    let height = display_config.height;
-
-    // Create and run video app
-    let mut app = Sdl2Display::new(&sdl_context, width, height)?;
-    app.run(&sdl_context, rx)?;
+    // Run the simple pipeline that should size the window correctly
+    match run_gstreamer_pipeline(&capture_config, &config.display) {
+        Ok(_) => info!("Pipeline completed successfully"),
+        Err(e) => error!("Pipeline error: {}", e),
+    }
 
     info!("Apollo shutting down");
     Ok(())

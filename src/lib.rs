@@ -18,6 +18,8 @@ pub struct Config {
     pub capture: CaptureConfig,
     pub display: DisplayConfig,
     pub pipeline: PipelineConfig,
+    #[cfg(feature = "gstreamer-pipeline")]
+    pub gstreamer: GStreamerConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,13 +57,23 @@ pub struct PipelineConfig {
     pub target_latency_ms: u32,
 }
 
+#[cfg(feature = "gstreamer-pipeline")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GStreamerConfig {
+    pub use_hardware_acceleration: bool,
+    pub prefer_zero_copy: bool,
+    pub custom_pipeline: Option<String>,
+    pub enable_fps_overlay: bool,
+    pub buffer_pool_size: u32,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
             capture: CaptureConfig {
                 device: FoundDevice::new("/dev/video0".into(), PixelFormat::Mjpeg.into()),
-                width: 1920,
-                height: 1080,
+                width: 800,
+                height: 600,
                 fps: 30,
                 format: PixelFormat::Mjpeg,
                 buffer_count: 4,
@@ -69,8 +81,8 @@ impl Default for Config {
                 use_dmabuf: false, // Requires kernel 5.19+
             },
             display: DisplayConfig {
-                width: 1920,
-                height: 1080,
+                width: 800,
+                height: 600,
             },
             pipeline: PipelineConfig {
                 ring_buffer_size: 8,
@@ -78,6 +90,14 @@ impl Default for Config {
                 enable_profiling: false,
                 // target_latency_ms: 16, // 60fps target
                 target_latency_ms: 32, // 30fps target
+            },
+            #[cfg(feature = "gstreamer-pipeline")]
+            gstreamer: GStreamerConfig {
+                use_hardware_acceleration: true,
+                prefer_zero_copy: true,
+                custom_pipeline: None,
+                enable_fps_overlay: true,
+                buffer_pool_size: 4,
             },
         }
     }
