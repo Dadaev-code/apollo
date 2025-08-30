@@ -1,3 +1,4 @@
+pub mod decoder;
 pub mod frame;
 pub mod v4l2;
 

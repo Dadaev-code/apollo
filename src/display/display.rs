@@ -11,7 +11,7 @@ use sdl2::video::{Window, WindowContext};
 
 use tracing::info;
 
-use crate::capture::Frame;
+use crate::capture::{decoder, Frame};
 
 /// SDL2 Window Display
 /// Handles window creation, event loop, and frame rendering.
@@ -46,13 +46,15 @@ impl Sdl2Display {
     }
 
     pub fn render_frame(&mut self, frame: &Frame) -> Result<()> {
+        let rgb_data = decoder::decode_frame(&frame.data, frame.meta.format)?;
+
         let mut texture = self
             .texture_creator
             .create_texture_streaming(PixelFormatEnum::RGB24, self.width, self.height)
             .map_err(|e| eyre!(e))?;
 
         texture
-            .update(None, &frame.data, (self.width * 3) as usize)
+            .update(None, &rgb_data, (self.width * 3) as usize)
             .map_err(|e| eyre!(e))?;
 
         self.canvas.clear();

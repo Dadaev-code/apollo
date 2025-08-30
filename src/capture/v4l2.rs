@@ -21,7 +21,7 @@ use crate::{
 
 /// High-performance V4L2 capture
 pub struct V4l2Capture {
-    device: Device,
+    device: Box<Device>,
     stream: Option<MmapStream<'static>>,
     config: CaptureConfig,
     sequence: u64,
@@ -53,6 +53,7 @@ impl V4l2Capture {
             PixelFormat::Yuyv4 => FourCC::new(b"YUYV"),
             _ => return Err(eyre!("Unsupported pixel format")),
         };
+
         device.set_format(&fmt)?;
 
         // Pre-allocate buffers for zero-copy
@@ -67,7 +68,7 @@ impl V4l2Capture {
         }
 
         Ok(Self {
-            device,
+            device: Box::new(device),
             stream: None,
             config,
             sequence: 0,
