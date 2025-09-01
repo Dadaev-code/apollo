@@ -1,95 +1,119 @@
-//! SDL2 Window Display Module
-//! Provides functionality to create an SDL2 window and display video frames.
-//! Uses the sdl2 crate for window management and rendering.
+//! Simplified GStreamer display that ensures proper window sizing
 
 use color_eyre::{eyre::eyre, Result};
-use flume::Receiver;
-use sdl2::event::Event;
-use sdl2::pixels::PixelFormatEnum;
-use sdl2::render::{Canvas, TextureCreator};
-use sdl2::video::{Window, WindowContext};
-
+use gstreamer as gst;
+use gstreamer::prelude::*;
 use tracing::info;
 
-use crate::capture::{decoder, Frame};
+use crate::{capture::PixelFormat, CaptureConfig, DisplayConfig};
 
-/// SDL2 Window Display
-/// Handles window creation, event loop, and frame rendering.
-/// Supports fullscreen and vsync options, with gpu acceleration.
-pub struct Sdl2Display {
-    canvas: Canvas<Window>,
-    texture_creator: TextureCreator<WindowContext>,
-    width: u32,
-    height: u32,
+/// Create and run a simple, properly-sized GStreamer pipeline
+pub fn run_pipeline(capture_config: &CaptureConfig, display_config: &DisplayConfig) -> Result<()> {
+    // Initialize GStreamer
+    gst::init().map_err(|e| eyre!("Failed to initialize GStreamer: {}", e))?;
+
+    info!(
+        "Creating GStreamer pipeline with window size {}x{}",
+        display_config.width, display_config.height
+    );
+
+    // Build a simpler pipeline that ensures window sizing
+    let pipeline_str = build_sized_pipeline(capture_config, display_config)?;
+    info!("Pipeline: {}", pipeline_str);
+
+    // Create and run the pipeline
+    let pipeline = gst::parse::launch(&pipeline_str)?;
+
+    // Set to PLAYING
+    pipeline
+        .set_state(gst::State::Playing)
+        .map_err(|_| eyre!("Failed to start pipeline"))?;
+
+    // Wait for EOS or error
+    let bus = pipeline.bus().unwrap();
+    for msg in bus.iter_timed(gst::ClockTime::NONE) {
+        use gst::MessageView;
+
+        match msg.view() {
+            MessageView::Eos(..) => break,
+            MessageView::Error(err) => {
+                pipeline.set_state(gst::State::Null).ok();
+                return Err(eyre!(
+                    "Pipeline error: {} ({})",
+                    err.error(),
+                    err.debug().unwrap_or_default()
+                ));
+            }
+            _ => {}
+        }
+    }
+
+    pipeline
+        .set_state(gst::State::Null)
+        .map_err(|_| eyre!("Failed to stop pipeline"))?;
+
+    Ok(())
 }
 
-impl Sdl2Display {
-    pub fn new(sdl_context: &sdl2::Sdl, width: u32, height: u32) -> Result<Self> {
-        let video_subsystem = sdl_context.video().map_err(|e| eyre!(e))?;
+fn build_sized_pipeline(capture: &CaptureConfig, display: &DisplayConfig) -> Result<String> {
+    let device = &capture.device.path;
 
-        let window_builder = video_subsystem
-            .window("Apollo Video Pipeline", width, height)
-            .position_centered()
-            .build()?;
+    // Detect the best decoder
+    let decoder = detect_best_decoder(capture);
 
-        let canvas_builder = window_builder.into_canvas().present_vsync();
-
-        let canvas = canvas_builder.build()?;
-        let texture_creator = canvas.texture_creator();
-
-        Ok(Self {
-            canvas,
-            texture_creator,
-            width,
-            height,
-        })
-    }
-
-    pub fn render_frame(&mut self, frame: &Frame) -> Result<()> {
-        let rgb_data = decoder::decode_frame(&frame.data, frame.meta.format)?;
-
-        let mut texture = self
-            .texture_creator
-            .create_texture_streaming(PixelFormatEnum::RGB24, self.width, self.height)
-            .map_err(|e| eyre!(e))?;
-
-        texture
-            .update(None, &rgb_data, (self.width * 3) as usize)
-            .map_err(|e| eyre!(e))?;
-
-        self.canvas.clear();
-        self.canvas
-            .copy(&texture, None, None)
-            .map_err(|e| eyre!(e))?;
-
-        self.canvas.present();
-        Ok(())
-    }
-
-    pub fn run(&mut self, sdl_context: &sdl2::Sdl, rx: Receiver<Frame>) -> Result<()> {
-        let mut event_pump = sdl_context.event_pump().map_err(|e| eyre!(e))?;
-
-        'running: loop {
-            for event in event_pump.poll_iter() {
-                match event {
-                    Event::Quit { .. } => {
-                        info!("Quit event received");
-                        break 'running;
-                    }
-                    _ => {}
-                }
-            }
-
-            match rx.recv() {
-                Ok(frame) => {
-                    self.render_frame(&frame)?;
-                }
-                Err(e) => {
-                    eprintln!("Failed to receive frame: {}", e);
-                }
-            }
+    // Build pipeline ensuring proper window size
+    // The key is to make sure we scale to the desired display size
+    let pipeline = match capture.format {
+        PixelFormat::Mjpeg => {
+            format!(
+                "v4l2src device={} ! \
+                 image/jpeg,width={},height={},framerate={}/1 ! \
+                 queue ! \
+                 {} ! \
+                 videoconvert ! \
+                 videoscale ! \
+                 video/x-raw,width={},height={} ! \
+                 fpsdisplaysink video-sink=\"xvimagesink force-aspect-ratio=false\" sync=false",
+                device,
+                capture.width,
+                capture.height,
+                capture.fps,
+                decoder,
+                display.width,
+                display.height
+            )
         }
+        _ => {
+            format!(
+                "v4l2src device={} ! \
+                 video/x-raw,width={},height={},framerate={}/1 ! \
+                 queue ! \
+                 videoconvert ! \
+                 videoscale ! \
+                 video/x-raw,width={},height={} ! \
+                 fpsdisplaysink video-sink=\"xvimagesink force-aspect-ratio=false\" sync=false",
+                device, capture.width, capture.height, capture.fps, display.width, display.height
+            )
+        }
+    };
 
-        Ok(())
+    Ok(pipeline)
+}
+
+fn detect_best_decoder(capture: &CaptureConfig) -> &'static str {
+    if capture.format != crate::capture::frame::PixelFormat::Mjpeg {
+        return "";
     }
+
+    // Try hardware decoders first
+    let decoders = ["nvjpegdec", "vaapijpegdec", "v4l2jpegdec", "jpegdec"];
+
+    for decoder in &decoders {
+        if gst::ElementFactory::find(decoder).is_some() {
+            info!("Using decoder: {}", decoder);
+            return decoder;
+        }
+    }
+
+    "jpegdec"
 }

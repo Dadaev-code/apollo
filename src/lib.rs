@@ -18,7 +18,6 @@ pub struct Config {
     pub capture: CaptureConfig,
     pub display: DisplayConfig,
     pub pipeline: PipelineConfig,
-    #[cfg(feature = "gstreamer-pipeline")]
     pub gstreamer: GStreamerConfig,
 }
 
@@ -57,7 +56,6 @@ pub struct PipelineConfig {
     pub target_latency_ms: u32,
 }
 
-#[cfg(feature = "gstreamer-pipeline")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GStreamerConfig {
     pub use_hardware_acceleration: bool,
@@ -72,8 +70,8 @@ impl Default for Config {
         Self {
             capture: CaptureConfig {
                 device: FoundDevice::new("/dev/video0".into(), PixelFormat::Mjpeg.into()),
-                width: 800,
-                height: 600,
+                width: 1920,
+                height: 1080,
                 fps: 30,
                 format: PixelFormat::Mjpeg,
                 buffer_count: 4,
@@ -81,7 +79,7 @@ impl Default for Config {
                 use_dmabuf: false, // Requires kernel 5.19+
             },
             display: DisplayConfig {
-                width: 800,
+                width: 1920,
                 height: 600,
             },
             pipeline: PipelineConfig {

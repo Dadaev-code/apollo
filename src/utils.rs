@@ -2,10 +2,7 @@ use crate::capture::frame::PixelFormat;
 use color_eyre::{eyre::eyre, Result};
 use serde::{Deserialize, Serialize};
 use tracing::info;
-use v4l::capability::Flags as CapFlags;
-use v4l::video::Capture;
-use v4l::Device;
-use v4l::FourCC;
+use v4l::{capability::Flags, video::Capture, Device, FourCC};
 
 // Detected capture device info
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,7 +32,7 @@ pub async fn auto_detect_device() -> Result<FoundDevice> {
         if let Ok(dev) = Device::with_path(&path) {
             if let Ok(caps) = dev.query_caps() {
                 // Check for capture capability
-                if caps.capabilities.contains(CapFlags::VIDEO_CAPTURE) {
+                if caps.capabilities.contains(Flags::VIDEO_CAPTURE) {
                     // Prefer devices with MJPEG support
                     if let Ok(formats) = dev.enum_formats() {
                         for fmt in formats {

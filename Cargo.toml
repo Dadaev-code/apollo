@@ -73,23 +73,9 @@ fast-jpeg = [] # Use -jpeg
 io-uring = ["tokio-uring"] # Linux io_uring support
 libcamera = ["dep:libcamera"] # Modern camera stack
 profiling = ["tracing-tracy"]
-gstreamer-pipeline = ["gstreamer", "gstreamer-video", "gstreamer-app", "gstreamer-pbutils"] # High-performance GStreamer pipeline
-
-[profile.release]
-opt-level = 3
-lto = "fat"
-codegen-units = 1
-strip = false # Keep symbols for profiling
-panic = "abort"
-debug = 1 # Minimal debug info
-
-[profile.release-with-debug]
-inherits = "release"
-strip = false
-debug = 2
-
-# Special profile for maximum performance
-[profile.bench]
-inherits = "release"
-lto = "fat"
-codegen-units = 1
+gstreamer-pipeline = [
+    "gstreamer",
+    "gstreamer-video",
+    "gstreamer-app",
+    "gstreamer-pbutils"
+] # High-performance GStreamer pipeline
